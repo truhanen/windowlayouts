@@ -1,4 +1,4 @@
-# truhanen.windowlayouts
+# windowlayouts
 
 Utility for automatically storing & restoring window layouts for specific screen
 configurations on the X Window System.
