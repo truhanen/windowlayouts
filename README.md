@@ -5,13 +5,17 @@ configurations on the X Window System.
 
 ## Installation
 
-Clone the repository & run `pip install .` in the project root directory to
-install the script to be used from the command line.
+Run `pip install truhanen.windowlayouts` to install the script `windowlayouts`
+to be used from the command line.
 
 ### Requirements
 
 - Python 3.7+ & pip
 - wmctrl command line tool
+
+### Install from source
+
+Clone the repository & run `pip install .` in the project root directory.
 
 ## Usage
 
