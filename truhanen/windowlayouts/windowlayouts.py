@@ -55,6 +55,9 @@ REGEX_XRANDR_SCREEN = re.compile(
 # Desktop number used for sticky windows
 DESKTOP_NUMBER_STICKY = -1
 
+# Seconds to wait after applying a screen layout with xrandr
+WAIT_XRANDR_APPLY = 10
+
 
 @dataclass_json
 @dataclass
@@ -389,7 +392,7 @@ async def restore_window_layout(**_):
 
 
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
-    """Run store, then switch to a screen layout configured in CONFIG_DIR/config.ini,
+    """Run store, then switch to a screen layout configured in CONFIG_PATH,
     and then run restore. Screen layout values in the configuration file must be
     valid input for xrandr that apply a specific screen layout. See
     examples/config.ini for example.
@@ -404,14 +407,13 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
     await run_command(f"xrandr {xrandr_arg}")
 
     # Wait for the desktop environment to stabilize.
-    wait_seconds = 10
-    LOG.info(f"Wait for {wait_seconds} seconds.")
-    await asyncio.sleep(wait_seconds)
+    LOG.info(f"Wait for {WAIT_XRANDR_APPLY} seconds.")
+    await asyncio.sleep(WAIT_XRANDR_APPLY)
 
     # Restore a previously stored window layout.
     await restore_window_layout(**kwargs)
 
-    # Notify user that everythin is ready.
+    # Notify user that everything is ready.
     await run_command("notify-send -t 1000 'Layout ready'")
 
 
@@ -437,16 +439,14 @@ def parse_args() -> argparse.Namespace:
 
     switch = subparsers.add_parser(
         "switch",
-        help=switch_screen_layout.__doc__.replace(
-            f"CONFIG_DIR/{CONFIG_PATH.name}", str(CONFIG_PATH)
-        ),
+        help=switch_screen_layout.__doc__.replace("CONFIG_PATH", str(CONFIG_PATH)),
     )
+    switch.set_defaults(func=switch_screen_layout)
     switch.add_argument(
         "screen_layout_name",
         choices=list(get_config_xrandr_args().keys()),
         help=f"The name of a screen layout configured in {CONFIG_PATH}.",
     )
-    switch.set_defaults(func=switch_screen_layout)
 
     return parser.parse_args()
 
