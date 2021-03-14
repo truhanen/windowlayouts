@@ -25,12 +25,13 @@ LOG = logging.getLogger(__file__)
 # Serialization paths
 JSON_PATH = Path(appdirs.user_cache_dir("windowlayouts")) / "windowlayouts.json"
 
-# Read configuration files.
-CONFIG_PATH = Path(appdirs.user_config_dir("windowlayouts")) / "config.ini"
+# Configuration file
+CONFIG_DIR = Path(appdirs.user_config_dir("windowlayouts"))
+CONFIG_PATH = CONFIG_DIR / "config.ini"
 CONFIG_SECTION_SCREENLAYOUTS = "screenlayouts"
 
 # Regex pattern for `wmctrl -lpG` output
-REGEX_WMCTRL_ROW = re.compile(
+REGEX_WMCTRL_WINDOW = re.compile(
     r"(?P<window_id>0x[a-z0-9]+) +"
     r"(?P<desktop_number>-?[0-9]+) +"
     r"(?P<process_id>[0-9]+) +"
@@ -80,23 +81,23 @@ class Screen:
 @dataclass_json
 @dataclass
 class Window:
-    # The title of the window.
+    # The title of the window
     name: str
-    # The class of the window.
+    # The class of the window
     window_class: str
-    # The window identifier used by the backend.
+    # The window identifier used by the backend
     window_id: str
-    # The process id of the window.
+    # The process id of the window
     process_id: Optional[str]
-    # The number of the virtual desktop of the window.
+    # The number of the virtual desktop of the window
     desktop_number: int
-    # The position of the window.
+    # The position of the window
     # Note that position determines the screen
     # in which the window is displayed.
     position: Position
-    # The size of the window.
+    # The size of the window
     size: Size
-    # Horizontal & vertical maximized state.
+    # Horizontal & vertical maximized state
     maximized_horizontal: bool
     maximized_vertical: bool
 
@@ -130,7 +131,7 @@ def log_window_layout(window_layout: WindowLayout, postfix: Optional[str] = None
 
 
 def log_window_layouts(window_layouts: List[WindowLayout]):
-    """Log debug data about a layout."""
+    """Log debug data about a set of window layouts."""
     for i, layout in enumerate(window_layouts):
         log_window_layout(layout, postfix=f"{i}")
 
@@ -154,7 +155,7 @@ def get_config_screen_layouts() -> Dict[str, str]:
 
 
 async def run_command(command: str) -> str:
-    """Run a shell command."""
+    """Run a shell command & return its output."""
     LOG.debug(f"Run shell command '{command}'.")
     process = await asyncio.create_subprocess_shell(
         command,
@@ -164,16 +165,35 @@ async def run_command(command: str) -> str:
     return stdout.decode()
 
 
-async def get_window(wmctrl_row: str) -> Optional[Window]:
+def parse_screen(xrandr_row: str) -> Optional[Screen]:
+    match = re.search(REGEX_XRANDR_SCREEN, xrandr_row)
+
+    if not match:
+        return None
+
+    return Screen(
+        name=match.group("name"),
+        size=Size(
+            width=int(match.group("width")),
+            height=int(match.group("height")),
+        ),
+        position=Position(
+            x=int(match.group("x")),
+            y=int(match.group("y")),
+        ),
+    )
+
+
+async def parse_window(wmctrl_row: str) -> Optional[Window]:
     """Create a Window from wmctrl output.
 
     Parameters
     ----------
     wmctrl_row
         Output row from `wmctrl -lpG`. None will be returned if this doesn't
-        match the expected format `REGEX_WMCTRL_ROW`.
+        match the expected format `REGEX_WMCTRL_WINDOW`.
     """
-    match = REGEX_WMCTRL_ROW.match(wmctrl_row)
+    match = REGEX_WMCTRL_WINDOW.match(wmctrl_row)
 
     if not match:
         return None
@@ -253,28 +273,16 @@ async def get_current_window_layout() -> WindowLayout:
     LOG.debug("Get current window layout.")
 
     # Get the current screen layout.
-    xrandr_output = await run_command("xrandr")
+    xrandr_rows = (await run_command("xrandr")).split("\n")
     screen_layout = []
-    for line in xrandr_output.split("\n"):
-        match = re.search(REGEX_XRANDR_SCREEN, line)
-        if match:
-            screen_layout.append(
-                Screen(
-                    name=match.group("name"),
-                    size=Size(
-                        width=int(match.group("width")),
-                        height=int(match.group("height")),
-                    ),
-                    position=Position(
-                        x=int(match.group("x")),
-                        y=int(match.group("y")),
-                    ),
-                )
-            )
+    for xrandr_row in xrandr_rows:
+        screen = parse_screen(xrandr_row)
+        if isinstance(screen, Screen):
+            screen_layout.append(screen)
 
     # Get the current windows.
     wmctrl_rows = (await run_command("wmctrl -lpG")).split("\n")
-    get_window_tasks = [asyncio.create_task(get_window(row)) for row in wmctrl_rows]
+    get_window_tasks = [asyncio.create_task(parse_window(row)) for row in wmctrl_rows]
     windows = [
         window
         for window in await asyncio.gather(*get_window_tasks)
@@ -291,10 +299,10 @@ async def get_current_window_layout() -> WindowLayout:
     return window_layout
 
 
-def open_stored_window_layouts() -> Optional[List[WindowLayout]]:
+def open_stored_window_layouts() -> List[WindowLayout]:
     """Open previously stored window layouts."""
     if not JSON_PATH.exists():
-        return None
+        return []
 
     LOG.info(f"Open stored window layouts from '{JSON_PATH}'.")
     with open(JSON_PATH) as f:
@@ -315,7 +323,7 @@ async def store_current_window_layout(**_):
     window_layout_current = await get_current_window_layout()
 
     # Get stored window layouts, if any.
-    window_layouts_stored: List[WindowLayout] = open_stored_window_layouts() or []
+    window_layouts_stored: List[WindowLayout] = open_stored_window_layouts()
 
     # Add the current WindowLayout to the stored WindowLayouts, possibly replacing a
     # former WindowLayout with identical screen layout.
@@ -343,12 +351,12 @@ async def restore_window_layout(**_):
     """Restore a window layout if one with the current screen layout has
     previously been stored.
     """
-    if not JSON_PATH.exists():
+    # Load previously stored layouts.
+    window_layouts_stored = open_stored_window_layouts()
+
+    if not window_layouts_stored:
         # Nothing to do if no layouts have been stored.
         return
-    else:
-        # Load previously stored layouts.
-        window_layouts_stored = open_stored_window_layouts()
 
     # Get the current window layout.
     window_layout_current = await get_current_window_layout()
@@ -426,7 +434,7 @@ def parse_args() -> argparse.Namespace:
     )
     switch.add_argument(
         "screen_layout_name",
-        choices=[name for name in get_config_screen_layouts().keys()],
+        choices=list(get_config_screen_layouts().keys()),
         help=f"The name of a screen layout configured in {CONFIG_PATH}.",
     )
     switch.set_defaults(func=switch_screen_layout)
