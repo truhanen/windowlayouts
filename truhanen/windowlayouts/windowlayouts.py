@@ -28,7 +28,7 @@ JSON_PATH = Path(appdirs.user_cache_dir("windowlayouts")) / "windowlayouts.json"
 # Configuration file
 CONFIG_DIR = Path(appdirs.user_config_dir("windowlayouts"))
 CONFIG_PATH = CONFIG_DIR / "config.ini"
-CONFIG_SECTION_SCREENLAYOUTS = "screenlayouts"
+CONFIG_SECTION_XRANDR_ARGS = "screenlayouts"
 
 # Regex pattern for `wmctrl -lpG` output
 REGEX_WMCTRL_WINDOW = re.compile(
@@ -136,22 +136,29 @@ def log_window_layouts(window_layouts: List[WindowLayout]):
         log_window_layout(layout, postfix=f"{i}")
 
 
-def get_config_screen_layouts() -> Dict[str, str]:
-    """Read screen layout configurations from the configuration file."""
+def get_config_xrandr_args() -> Dict[str, str]:
+    """Read xrandr argument configurations from CONFIG_PATH.
+
+    Returns
+    -------
+    xrandr_args
+        A mapping from screen layout names to xrandr arguments that apply
+        specific screen layouts.
+    """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
-    screen_layouts = {}
-    if CONFIG_SECTION_SCREENLAYOUTS in config:
-        for screen_layout_name, screen_layout_value in config[
-            CONFIG_SECTION_SCREENLAYOUTS
+    xrandr_args = {}
+    if CONFIG_SECTION_XRANDR_ARGS in config:
+        for screen_layout_name, xrandr_arg in config[
+            CONFIG_SECTION_XRANDR_ARGS
         ].items():
-            screen_layouts[screen_layout_name] = screen_layout_value
+            xrandr_args[screen_layout_name] = xrandr_arg.replace("\n", " ")
 
-    if not screen_layouts:
+    if not xrandr_args:
         LOG.warning(f"Couldn't read screen layout configurations from '{CONFIG_PATH}'.")
 
-    return screen_layouts
+    return xrandr_args
 
 
 async def run_command(command: str) -> str:
@@ -392,12 +399,14 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
 
     # Apply the screen layout.
     LOG.info(f"Apply screen layout '{screen_layout_name}'.")
-    config_screen_layouts = get_config_screen_layouts()
-    xrandr_args = config_screen_layouts[screen_layout_name].replace("\n", " ")
-    await run_command(f"xrandr {xrandr_args}")
+    config_xrandr_args = get_config_xrandr_args()
+    xrandr_arg = config_xrandr_args[screen_layout_name]
+    await run_command(f"xrandr {xrandr_arg}")
 
     # Wait for the desktop environment to stabilize.
-    await asyncio.sleep(10)
+    wait_seconds = 10
+    LOG.info(f"Wait for {wait_seconds} seconds.")
+    await asyncio.sleep(wait_seconds)
 
     # Restore a previously stored window layout.
     await restore_window_layout(**kwargs)
@@ -434,7 +443,7 @@ def parse_args() -> argparse.Namespace:
     )
     switch.add_argument(
         "screen_layout_name",
-        choices=list(get_config_screen_layouts().keys()),
+        choices=list(get_config_xrandr_args().keys()),
         help=f"The name of a screen layout configured in {CONFIG_PATH}.",
     )
     switch.set_defaults(func=switch_screen_layout)
