@@ -308,8 +308,9 @@ def open_stored_window_layouts() -> Optional[List[WindowLayout]]:
 
 
 async def store_current_window_layout(**_):
-    """Store the current window layout for the current screen layout. Possibly
-    replace values in previously stored layouts.
+    """Store the current window layout for the current screen layout. Replace
+    a previously stored window layout if such a window layout exists for the
+    current screen layout.
     """
     window_layout_current = await get_current_window_layout()
 
@@ -373,10 +374,10 @@ async def restore_window_layout(**_):
 
 
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
-    """Run store, then switch to a screen layout configured in config.ini,
-    and then run restore. Screen layout values in the configuration file should
-    be valid input for xrandr that apply a specific screen layout. See
-    examples/config_example.ini for example.
+    """Run store, then switch to a screen layout configured in CONFIG_DIR/config.ini,
+    and then run restore. Screen layout values in the configuration file must be
+    valid input for xrandr that apply a specific screen layout. See
+    examples/config.ini for example.
     """
     # Store the current window layout.
     await store_current_window_layout(**kwargs)
@@ -419,7 +420,9 @@ def parse_args() -> argparse.Namespace:
 
     switch = subparsers.add_parser(
         "switch",
-        help=switch_screen_layout.__doc__.replace(CONFIG_PATH.name, str(CONFIG_PATH)),
+        help=switch_screen_layout.__doc__.replace(
+            f"CONFIG_DIR/{CONFIG_PATH.name}", str(CONFIG_PATH)
+        ),
     )
     switch.add_argument(
         "screen_layout_name",
