@@ -45,7 +45,7 @@ REGEX_WMCTRL_WINDOW = re.compile(
 
 # Regex pattern for xrandr output.
 REGEX_XRANDR_SCREEN = re.compile(
-    r"(?P<name>[a-zA-Z0-9-]+) .+ "
+    r"(?P<name>[a-zA-Z0-9-.]+) .+ "
     r"(?P<width>[0-9]+)x"
     r"(?P<height>[0-9]+)"
     r"(?P<x>[+-][0-9]*)"
