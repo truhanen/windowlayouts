@@ -139,14 +139,17 @@ def log_window_layouts(window_layouts: List[WindowLayout]):
         log_window_layout(layout, postfix=f"{i}")
 
 
-def get_config_xrandr_args() -> Dict[str, str]:
-    """Read xrandr argument configurations from CONFIG_PATH.
+def get_config_xrandr_args() -> Dict[str, List[str]]:
+    """Read xrandr argument configurations from CONFIG_PATH. Assume that if the
+    values in CONFIG_PATH are multi-line, each line can be used independently as
+    a valid xrandr input.
 
     Returns
     -------
     xrandr_args
         A mapping from screen layout names to xrandr arguments that apply
-        specific screen layouts.
+        specific screen layouts. Each value in the returned lists can be used as
+        a valid xrandr input.
     """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
@@ -156,7 +159,7 @@ def get_config_xrandr_args() -> Dict[str, str]:
         for screen_layout_name, xrandr_arg in config[
             CONFIG_SECTION_XRANDR_ARGS
         ].items():
-            xrandr_args[screen_layout_name] = xrandr_arg.replace("\n", " ")
+            xrandr_args[screen_layout_name] = xrandr_arg.split("\n")
 
     if not xrandr_args:
         LOG.warning(f"Couldn't read screen layout configurations from '{CONFIG_PATH}'.")
@@ -394,8 +397,9 @@ async def restore_window_layout(**_):
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
     """Run store, then switch to a screen layout configured in CONFIG_PATH,
     and then run restore. Screen layout values in the configuration file must be
-    valid input for xrandr that apply a specific screen layout. See
-    examples/config.ini for example.
+    valid input for xrandr that apply a specific screen layout. Each "output" of
+    a screen layout must be defined on a separate line in the configuration
+    value. See examples/config.ini for example.
     """
     # Store the current window layout.
     await store_current_window_layout(**kwargs)
@@ -403,8 +407,11 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
     # Apply the screen layout.
     LOG.info(f"Apply screen layout '{screen_layout_name}'.")
     config_xrandr_args = get_config_xrandr_args()
-    xrandr_arg = config_xrandr_args[screen_layout_name]
-    await run_command(f"xrandr {xrandr_arg}")
+    xrandr_args = config_xrandr_args[screen_layout_name]
+    # Apply the xrandr inputs sequentially. On some setups simultaenously
+    # configuring multiple outputs with xrandr causes problems.
+    for xrandr_arg in xrandr_args:
+        await run_command(f"xrandr {xrandr_arg}")
 
     # Wait for the desktop environment to stabilize.
     LOG.info(f"Wait for {WAIT_XRANDR_APPLY} seconds.")

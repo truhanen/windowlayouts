@@ -37,8 +37,10 @@ positional arguments:
                         in ~/.config/windowlayouts/config.ini, and
                         then run restore. Screen layout values in the
                         configuration file must be valid input for xrandr that
-                        apply a specific screen layout. See
-                        examples/config.ini for example.
+                        apply a specific screen layout. Each "output" of a
+                        screen layout must be defined on a separate line in
+                        the configuration value. See examples/config.ini for
+                        example.
 
 optional arguments:
   -h, --help            show this help message and exit
