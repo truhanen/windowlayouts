@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "truhanen.windowlayouts"
-version = "0.3.0"
+version = "1.0.0"
 packages = [
   {include = "truhanen"},
 ]
@@ -33,6 +33,7 @@ pandas = ["pandas"]
 
 [tool.poetry.dev-dependencies]
 Jinja2 = "^2.11.3"
+markupsafe = "^1.0.0"
 black = "^20.8b1"
 isort = "^5.7.0"
 
