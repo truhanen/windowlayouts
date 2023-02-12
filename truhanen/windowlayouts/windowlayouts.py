@@ -139,15 +139,17 @@ def log_window_layouts(window_layouts: List[WindowLayout]):
         log_window_layout(layout, postfix=f"{i}")
 
 
-def get_config_xrandr_args() -> Dict[str, str]:
-    """Read xrandr argument configurations from CONFIG_PATH. Multi-line values
-    in CONFIG_PATH are handled as arguments for a single xrandr call.
+def get_config_xrandr_args() -> Dict[str, List[str]]:
+    """Read xrandr argument configurations from CONFIG_PATH. Every line in a
+    multi-line value in CONFIG_PATH is handled as input for a single xrandr
+    call.
 
     Returns
     -------
     xrandr_args
         A mapping from screen layout names to xrandr arguments that apply
-        specific screen layouts.
+        specific screen layouts. Each value in the returned lists can be used as
+        a valid xrandr input.
     """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
@@ -157,7 +159,7 @@ def get_config_xrandr_args() -> Dict[str, str]:
         for screen_layout_name, xrandr_arg in config[
             CONFIG_SECTION_XRANDR_ARGS
         ].items():
-            xrandr_args[screen_layout_name] = xrandr_arg.replace("\n", " ")
+            xrandr_args[screen_layout_name] = xrandr_arg.split("\n")
 
     if not xrandr_args:
         LOG.warning(f"Couldn't read screen layout configurations from '{CONFIG_PATH}'.")
@@ -405,8 +407,9 @@ async def restore_window_layout(**_):
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
     """Run store, then switch to a screen layout configured in CONFIG_PATH,
     and then run restore. Screen layout values in the configuration file must be
-    valid input for xrandr that apply a specific screen layout. See
-    examples/config.ini for example.
+    valid input for xrandr that apply a specific screen layout. Each screen of
+    a screen layout should be defined on a separate line in the configuration
+    value. See examples/config.ini for example.
     """
     # Store the current window layout.
     await store_current_window_layout(**kwargs)
@@ -415,6 +418,7 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
     LOG.info(f"Apply screen layout '{screen_layout_name}'.")
     config_xrandr_args = get_config_xrandr_args()
     xrandr_args = config_xrandr_args[screen_layout_name]
+    xrandr_args_single = " ".join(xrandr_args)
 
     # Workaround to turn on connected outputs that may be in suspend mode and
     # hence shown as disconnected. See
@@ -425,8 +429,12 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
 
     try:
         # First call with `--dryrun` to ensure there's no problems.
-        await run_command(f"xrandr --dryrun {xrandr_args}")
-        await run_command(f"xrandr {xrandr_args}")
+        await run_command(f"xrandr --dryrun {xrandr_args_single}")
+        # Apply the xrandr inputs sequentially. On some setups simultaenously
+        # configuring multiple outputs with xrandr may cause problems.
+        for xrandr_arg in xrandr_args:
+            await run_command(f"xrandr {xrandr_arg}")
+            await asyncio.sleep(0.1)
     except RuntimeError as e:
         message = e.args[0]
         for line in message.split("\n"):
