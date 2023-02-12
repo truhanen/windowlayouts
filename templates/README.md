@@ -3,22 +3,25 @@
 
 # windowlayouts
 
-Utility for automatically storing & restoring window layouts for specific screen
-configurations on the X Window System.
+Utility for automatically storing & restoring application window layouts for
+specific screen configurations on the X Window System.
+
+For example, if a user frequently changes their setup between a single laptop
+screen and two external monitors, this tool remembers & automatically restores
+all windows to their original positions for each monitor setup without the need
+for manual rearrangement.
 
 ## Installation
 
 Run `pip install truhanen.windowlayouts` to install the script `windowlayouts`
 to be used from the command line.
 
+To install from source, run `pip install .` in the project root directory.
+
 ### Requirements
 
-- Python 3.7+ & pip
+- Python 3.7+
 - wmctrl command line tool
-
-### Install from source
-
-Clone the repository & run `pip install .` in the project root directory.
 
 ## Usage
 
