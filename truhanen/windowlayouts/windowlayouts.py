@@ -165,7 +165,13 @@ def get_config_xrandr_args() -> Dict[str, List[str]]:
 
 
 async def run_command(command: str) -> str:
-    """Run a shell command & return its output."""
+    """Run a shell command & return its output.
+
+    Raises
+    ------
+    RuntimeError
+        If the command returns a non-zero exit code.
+    """
     LOG.debug(f"Run shell command '{command}'.")
     process = await asyncio.create_subprocess_shell(
         command,
@@ -182,7 +188,52 @@ async def run_command(command: str) -> str:
 
 
 async def notify(message: str, seconds: int = 5):
+    """Notify user with notify-send."""
     await run_command(f"notify-send -t {seconds * 1000} -a 'Windowlayouts' '{message}'")
+
+
+async def apply_xrandr_args(xrandr_args: List[str]):
+    """Gently call xrandr with the given arguments.
+
+    Extra reliability measures:
+    - First call xrandr without arguments as a workaround to turn on connected
+      outputs that may be in suspend mode and hence shown as disconnected.
+      See https://wiki.archlinux.org/title/xrandr#Avoid_X_crash_with_xrasengan
+    - Call xrandr with '--dry-run' to catch errors before changing anything.
+    - Apply arguments sequentially by multiple xrandr calls instead of a single
+      call with many arguments. This may improve stability on some systems.
+
+    Parameters
+    ----------
+    xrandr_args
+        Inputs for xrandr. Each item should be valid input for a single xrandr
+        call.
+
+    Raises
+    ------
+    RuntimeError
+        If calling xrandr with the given arguments returns a non-zero exit code.
+    """
+    # Call xrandr without arguments as a workaround for suspended displays.
+    for _ in range(2):
+        await run_command(f"xrandr")
+        await asyncio.sleep(1)
+
+    xrandr_args_single = " ".join(xrandr_args)
+    try:
+        # First call with `--dryrun` to ensure there's no problems.
+        await run_command(f"xrandr --dryrun {xrandr_args_single}")
+        # Apply the xrandr inputs sequentially for stability.
+        for xrandr_arg in xrandr_args:
+            await run_command(f"xrandr {xrandr_arg}")
+            await asyncio.sleep(0.1)
+    except RuntimeError as e:
+        message = e.args[0]
+        for line in message.split("\n"):
+            if line.startswith("xrandr: "):
+                message = line[len("xrandr: ") :]
+                break
+        raise RuntimeError(f"Could not set screen layout: {message}") from e
 
 
 def parse_screen(xrandr_row: str) -> Optional[Screen]:
@@ -404,15 +455,14 @@ async def restore_window_layout(**_):
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
     """Run store, then switch to a screen layout configured in CONFIG_PATH,
     and then run restore. Screen layout values in the configuration file must be
-    valid input for xrandr that apply a specific screen layout. Each screen of
+    valid input for xrandr that apply a specific screen layout. Each "output" of
     a screen layout should be defined on a separate line in the configuration
     value. See examples/config.ini for example.
     """
     # Store the current window layout.
     await store_current_window_layout(**kwargs)
 
-    # Apply the screen layout.
-    LOG.info(f"Apply screen layout '{screen_layout_name}'.")
+    # Read xrandr arguments from CONFIG_PATH.
     config_xrandr_args = get_config_xrandr_args()
     if screen_layout_name not in config_xrandr_args:
         raise RuntimeError(
@@ -420,30 +470,12 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
             f"from '{CONFIG_PATH}'."
         )
     xrandr_args = config_xrandr_args[screen_layout_name]
-    xrandr_args_single = " ".join(xrandr_args)
 
-    # Workaround to turn on connected outputs that may be in suspend mode and
-    # hence shown as disconnected. See
-    # https://wiki.archlinux.org/title/xrandr#Avoid_X_crash_with_xrasengan
-    for _ in range(2):
-        await run_command(f"xrandr")
-        await asyncio.sleep(1)
-
+    LOG.info(f"Apply screen layout '{screen_layout_name}'.")
     try:
-        # First call with `--dryrun` to ensure there's no problems.
-        await run_command(f"xrandr --dryrun {xrandr_args_single}")
-        # Apply the xrandr inputs sequentially. On some setups simultaenously
-        # configuring multiple outputs with xrandr may cause problems.
-        for xrandr_arg in xrandr_args:
-            await run_command(f"xrandr {xrandr_arg}")
-            await asyncio.sleep(0.1)
+        await apply_xrandr_args(xrandr_args)
     except RuntimeError as e:
-        message = e.args[0]
-        for line in message.split("\n"):
-            if line.startswith("xrandr: "):
-                message = line[len("xrandr: ") :]
-                break
-        await notify(f"Could not set screen layout: {message}")
+        await notify(e.args[0])
         raise e
 
     # Wait for the desktop environment to stabilize.
