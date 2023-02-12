@@ -161,9 +161,6 @@ def get_config_xrandr_args() -> Dict[str, List[str]]:
         ].items():
             xrandr_args[screen_layout_name] = xrandr_arg.split("\n")
 
-    if not xrandr_args:
-        LOG.warning(f"Couldn't read screen layout configurations from '{CONFIG_PATH}'.")
-
     return xrandr_args
 
 
@@ -417,6 +414,11 @@ async def switch_screen_layout(screen_layout_name: str, **kwargs):
     # Apply the screen layout.
     LOG.info(f"Apply screen layout '{screen_layout_name}'.")
     config_xrandr_args = get_config_xrandr_args()
+    if screen_layout_name not in config_xrandr_args:
+        raise RuntimeError(
+            f"Couldn't read configuration for screen layout '{screen_layout_name}' "
+            f"from '{CONFIG_PATH}'."
+        )
     xrandr_args = config_xrandr_args[screen_layout_name]
     xrandr_args_single = " ".join(xrandr_args)
 
