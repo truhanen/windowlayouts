@@ -52,8 +52,10 @@ REGEX_XRANDR_SCREEN = re.compile(
     r"(?P<y>[+-][0-9]*)"
 )
 
-# Desktop number used for sticky windows
+# Desktop number displayed by wmctrl for sticky windows
 DESKTOP_NUMBER_STICKY = -1
+# Desktop number for sticky windows when set by wmctrl (-1 doesn't work)
+DESKTOP_NUMBER_STICKY_INPUT = -2
 
 # Seconds to wait after applying a screen layout with xrandr
 WAIT_XRANDR_APPLY = 10
@@ -319,6 +321,8 @@ async def restore_window(window: Window):
     # Set desktop number or sticky value.
     if desktop_number == DESKTOP_NUMBER_STICKY:
         await run_command(f"wmctrl -i -r {window_id} -b add,sticky")
+        # The above isn't enough on some desktop environments.
+        await run_command(f"wmctrl -i -r {window_id} -t {DESKTOP_NUMBER_STICKY_INPUT}")
     else:
         await run_command(f"wmctrl -i -r {window_id} -b remove,sticky")
         await run_command(f"wmctrl -i -r {window_id} -t {desktop_number}")
