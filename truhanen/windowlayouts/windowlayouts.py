@@ -308,6 +308,9 @@ async def restore_window(window: Window):
     current_desktop_count = len((await run_command("wmctrl -d")).split("\n"))
     desktop_number = min(window.desktop_number, current_desktop_count)
 
+    # Maximize to break tiling.
+    await run_command(f"wmctrl -i -r {window_id} -b add,maximized_vert,maximized_horz")
+
     # Unmaximize before moving.
     await run_command(
         f"wmctrl -i -r {window_id} -b remove,maximized_vert,maximized_horz"
