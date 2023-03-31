@@ -28,7 +28,7 @@ JSON_PATH = Path(appdirs.user_cache_dir("windowlayouts")) / "windowlayouts.json"
 # Configuration file
 CONFIG_DIR = Path(appdirs.user_config_dir("windowlayouts"))
 CONFIG_PATH = CONFIG_DIR / "config.ini"
-CONFIG_SECTION_XRANDR_ARGS = "screenlayouts"
+CONFIG_SECTION_SCREEN_LAYOUTS = "screenlayouts"
 
 # Regex pattern for `wmctrl -lpG` output
 REGEX_WMCTRL_WINDOW = re.compile(
@@ -57,8 +57,8 @@ DESKTOP_NUMBER_STICKY = -1
 # Desktop number for sticky windows when set by wmctrl (-1 doesn't work)
 DESKTOP_NUMBER_STICKY_INPUT = -2
 
-# Seconds to wait after applying a screen layout with xrandr
-WAIT_XRANDR_APPLY = 10
+# Seconds to wait after applying a screen layout with a command
+WAIT_SCREEN_LAYOUT_APPLY = 10
 
 
 @dataclass_json
@@ -141,29 +141,27 @@ def log_window_layouts(window_layouts: List[WindowLayout]):
         log_window_layout(layout, postfix=f"{i}")
 
 
-def get_config_xrandr_args() -> Dict[str, List[str]]:
-    """Read xrandr argument configurations from CONFIG_PATH. Every line in a
-    multi-line value in CONFIG_PATH is handled as input for a single xrandr
-    call.
+def get_config_screen_layout_commands() -> Dict[str, str]:
+    """Read screen layout commands from CONFIG_PATH. Lines of a multi-line value
+    in CONFIG_PATH are concatenated as a single command.
 
     Returns
     -------
-    xrandr_args
-        A mapping from screen layout names to xrandr arguments that apply
-        specific screen layouts. Each value in the returned lists can be used as
-        a valid xrandr input.
+    layout_commands
+        A mapping from screen layout names to commands that apply specific
+        screen layouts.
     """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
-    xrandr_args = {}
-    if CONFIG_SECTION_XRANDR_ARGS in config:
-        for screen_layout_name, xrandr_arg in config[
-            CONFIG_SECTION_XRANDR_ARGS
+    layout_commands = {}
+    if CONFIG_SECTION_SCREEN_LAYOUTS in config:
+        for screen_layout_name, command in config[
+            CONFIG_SECTION_SCREEN_LAYOUTS
         ].items():
-            xrandr_args[screen_layout_name] = xrandr_arg.split("\n")
+            layout_commands[screen_layout_name] = " ".join(command.split("\n"))
 
-    return xrandr_args
+    return layout_commands
 
 
 async def run_command(command: str) -> str:
@@ -194,41 +192,31 @@ async def notify(message: str, seconds: int = 5):
     await run_command(f"notify-send -t {seconds * 1000} -a 'Windowlayouts' '{message}'")
 
 
-async def apply_xrandr_args(xrandr_args: List[str]):
-    """Gently call xrandr with the given arguments.
+async def apply_screen_layout_command(command: str):
+    """Gently apply a screen layout command.
 
     Extra reliability measures:
     - First call xrandr without arguments as a workaround to turn on connected
       outputs that may be in suspend mode and hence shown as disconnected.
       See https://wiki.archlinux.org/title/xrandr#Avoid_X_crash_with_xrasengan
-    - Call xrandr with '--dry-run' to catch errors before changing anything.
-    - Apply arguments sequentially by multiple xrandr calls instead of a single
-      call with many arguments. This may improve stability on some systems.
 
     Parameters
     ----------
-    xrandr_args
-        Inputs for xrandr. Each item should be valid input for a single xrandr
-        call.
+    command
+        The command to apply the screen configuration.
 
     Raises
     ------
     RuntimeError
-        If calling xrandr with the given arguments returns a non-zero exit code.
+        If the command returns a non-zero exit code.
     """
     # Call xrandr without arguments as a workaround for suspended displays.
     for _ in range(2):
         await run_command(f"xrandr")
         await asyncio.sleep(1)
 
-    xrandr_args_single = " ".join(xrandr_args)
     try:
-        # First call with `--dryrun` to ensure there's no problems.
-        await run_command(f"xrandr --dryrun {xrandr_args_single}")
-        # Apply the xrandr inputs sequentially for stability.
-        for xrandr_arg in xrandr_args:
-            await run_command(f"xrandr {xrandr_arg}")
-            await asyncio.sleep(0.1)
+        await run_command(command)
     except RuntimeError as e:
         message = e.args[0]
         for line in message.split("\n"):
@@ -239,6 +227,7 @@ async def apply_xrandr_args(xrandr_args: List[str]):
 
 
 def parse_screen(xrandr_row: str) -> Optional[Screen]:
+    """Parse screen information from an xrandr output row."""
     match = re.search(REGEX_XRANDR_SCREEN, xrandr_row)
 
     if not match:
@@ -462,32 +451,31 @@ async def restore_window_layout(**_):
 async def switch_screen_layout(screen_layout_name: str, **kwargs):
     """Run store, then switch to a screen layout configured in CONFIG_PATH,
     and then run restore. Screen layout values in the configuration file must be
-    valid input for xrandr that apply a specific screen layout. Each "output" of
-    a screen layout should be defined on a separate line in the configuration
-    value. See examples/config.ini for example.
+    valid shell commands that apply a specific screen layout. See
+    examples/config.ini for example.
     """
     # Store the current window layout.
     await store_current_window_layout(**kwargs)
 
-    # Read xrandr arguments from CONFIG_PATH.
-    config_xrandr_args = get_config_xrandr_args()
-    if screen_layout_name not in config_xrandr_args:
+    # Read commands from CONFIG_PATH.
+    config_screen_layout_commands = get_config_screen_layout_commands()
+    if screen_layout_name not in config_screen_layout_commands:
         raise RuntimeError(
             f"Couldn't read configuration for screen layout '{screen_layout_name}' "
             f"from '{CONFIG_PATH}'."
         )
-    xrandr_args = config_xrandr_args[screen_layout_name]
+    screen_layout_command = config_screen_layout_commands[screen_layout_name]
 
     LOG.info(f"Apply screen layout '{screen_layout_name}'.")
     try:
-        await apply_xrandr_args(xrandr_args)
+        await apply_screen_layout_command(screen_layout_command)
     except RuntimeError as e:
         await notify(e.args[0])
         raise e
 
     # Wait for the desktop environment to stabilize.
-    await notify(f"Waiting for {WAIT_XRANDR_APPLY} seconds")
-    await asyncio.sleep(WAIT_XRANDR_APPLY)
+    await notify(f"Waiting for {WAIT_SCREEN_LAYOUT_APPLY} seconds")
+    await asyncio.sleep(WAIT_SCREEN_LAYOUT_APPLY)
 
     # Restore a previously stored window layout.
     await restore_window_layout(**kwargs)
@@ -523,7 +511,7 @@ def parse_args() -> argparse.Namespace:
     switch.set_defaults(func=switch_screen_layout)
     switch.add_argument(
         "screen_layout_name",
-        choices=list(get_config_xrandr_args().keys()),
+        choices=list(get_config_screen_layout_commands().keys()),
         help=f"The name of a screen layout configured in {CONFIG_PATH}.",
     )
 
